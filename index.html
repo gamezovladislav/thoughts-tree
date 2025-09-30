@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Плитки с текстовыми полями и стрелками (HTML+JS+CSS)</title>
+  <style>
+    :root {
+      --board-bg: #f7f7fb;
+      --grid-color: rgba(0,0,0,0.05);
+      --node-bg: #ffffff;
+      --node-border: #dbe0ea;
+      --node-shadow: 0 4px 18px rgba(0,0,0,0.08);
+      --handle-bg: #f1f3f7;
+      --accent: #3b82f6;
+      --text: #0f172a;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      color: var(--text);
+      background: #fff;
+    }
+
+    .app {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+    }
+
+    .title {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    /* Рабочая панель */
+    #boardWrap {
+      position: relative;
+      flex: 1 1 auto;
+      border: 1px solid var(--node-border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--board-bg);
+      /* Сетка */
+      background-image:
+        linear-gradient(var(--grid-color) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+      background-size: 24px 24px, 24px 24px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
+      min-height: 520px;
+    }
+
+    /* SVG слой с линиями */
+    #edges {
+      position: absolute;
+      inset: 0;
+      z-index: 0; /* линии под плитками */
+      pointer-events: none; /* чтобы не мешали перетаскиванию */
+    }
+
+    /* Контейнер с плитками */
+    #board {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+    }
+
+    .node {
+      position: absolute;
+      width: 240px;
+      min-height: 90px;
+      background: var(--node-bg);
+      border: 1px solid var(--node-border);
+      border-radius: 12px;
+      box-shadow: var(--node-shadow);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+      touch-action: none; /* для PointerEvents на мобильных */
+    }
+
+    .node .handle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      background: var(--handle-bg);
+      border-bottom: 1px solid var(--node-border);
+      cursor: grab;
+      font-size: 12px;
+      color: #334155;
+    }
+    .node.dragging .handle { cursor: grabbing; }
+
+    .node .content {
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .node input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--node-border);
+      border-radius: 10px;
+      outline: none;
+      font-size: 14px;
+    }
+        /* Заголовок в шапке (редактируемый) */
+    .title-input {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 8px;
+      border: 1px solid var(--node-border);
+      border-radius: 8px;
+      background: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    .title-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+    }
+    .grip {
+      user-select: none;
+      font-size: 14px;
+      line-height: 1;
+      color: #64748b;
+      padding-right: 6px;
+    }
+    /* Многострочный текст */
+    .node textarea {
+      width: 100%;
+      min-height: 80px;
+      padding: 10px 12px;
+      border: 1px solid var(--node-border);
+      border-radius: 10px;
+      outline: none;
+      font-size: 14px;
+      resize: vertical;
+    }
+    .node textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+    }
+
+    .btn {
+      appearance: none;
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: transform .06s ease;
+    }
+    .btn:active { transform: translateY(1px); }
+
+    .subtle {
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    /* Подсказка */
+    .hint {
+      position: absolute;
+      right: 10px; bottom: 10px;
+      font-size: 12px;
+      background: rgba(255,255,255,0.9);
+      border: 1px solid var(--node-border);
+      padding: 6px 10px;
+      border-radius: 999px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="title">Панель: перетаскивайте плитки, нажимайте «Add» для добавления дочерних плиток</div>
+
+    <div id="boardWrap">
+      <!-- SVG со стрелками -->
+      <svg id="edges"></svg>
+      <!-- Контейнер для узлов -->
+      <div id="board"></div>
+      <div class="hint">Перетаскивайте за серую шапку • Add → создаёт потомка</div>
+    </div>
+  </div>
+
+  <script>
+    // ======== Утилиты ID и состояния ========
+    let idSeq = 1;
+    const newId = () => `n${idSeq++}`;
+
+    const state = {
+      nodes: new Map(), // id -> { id, el, childrenCount }
+      edges: [],        // { from, to, path }
+      dragging: null,   // { id, startX, startY, offsetX, offsetY }
+    };
+
+    const boardWrap = document.getElementById('boardWrap');
+    const board = document.getElementById('board');
+    const edgesSvg = document.getElementById('edges');
+
+    // Подготовка SVG: маркер стрелки и resize
+    function setupSvg() {
+      edgesSvg.setAttribute('width', '100%');
+      edgesSvg.setAttribute('height', '100%');
+      edgesSvg.setAttribute('viewBox', `0 0 ${boardWrap.clientWidth} ${boardWrap.clientHeight}`);
+
+      let defs = edgesSvg.querySelector('defs');
+      if (!defs) {
+        defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        edgesSvg.appendChild(defs);
+      }
+      let marker = edgesSvg.querySelector('#arrow');
+      if (!marker) {
+        marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', 'arrow');
+        marker.setAttribute('markerWidth', '12');
+        marker.setAttribute('markerHeight', '12');
+        marker.setAttribute('refX', '10');
+        marker.setAttribute('refY', '5');
+        marker.setAttribute('orient', 'auto');
+        marker.setAttribute('markerUnits', 'strokeWidth');
+        const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        arrowPath.setAttribute('d', 'M0,0 L10,5 L0,10 z');
+        arrowPath.setAttribute('fill', '#334155');
+        marker.appendChild(arrowPath);
+        defs.appendChild(marker);
+      }
+    }
+
+    function onResize() {
+      edgesSvg.setAttribute('viewBox', `0 0 ${boardWrap.clientWidth} ${boardWrap.clientHeight}`);
+      updateAllEdges();
+    }
+    window.addEventListener('resize', onResize);
+
+    // ======== Создание узла ========
+    function createNode(x, y) {
+      const id = newId();
+
+      const nodeEl = document.createElement('div');
+      nodeEl.className = 'node';
+      nodeEl.dataset.id = id;
+      nodeEl.style.left = x + 'px';
+      nodeEl.style.top = y + 'px';
+
+      nodeEl.innerHTML = `
+        <div class="handle">
+          <span class="grip" title="Перетаскивать">⠿</span>
+          <input class="title-input" type="text" value="Tile ${id}" />
+          <button class="btn btn-add" type="button">Add</button>
+        </div>
+        <div class="content">
+          <textarea placeholder="Введите текст..."></textarea>
+        </div>
+      `;
+
+      // Drag events (Pointer Events)
+      const handle = nodeEl.querySelector('.handle');
+      handle.addEventListener('pointerdown', (e) => { if (e.target.closest('input, textarea, .btn')) return; startDrag(e, id, nodeEl); });
+
+      // Prevent text selection during drag
+      handle.addEventListener('dragstart', (e) => e.preventDefault());
+
+      // Add child
+            const addBtn = nodeEl.querySelector('.btn-add');
+      addBtn.addEventListener('click', (e) => { e.stopPropagation(); addChildNode(id); });
+      const ta = nodeEl.querySelector('textarea');
+      if (ta) ta.addEventListener('input', () => updateEdgesForNode(id));
+      board.appendChild(nodeEl);
+
+      state.nodes.set(id, { id, el: nodeEl, childrenCount: 0 });
+
+      // Ensure inside bounds initially
+      clampNodeToBoard(nodeEl);
+
+      return id;
+    }
+
+    // ======== Создание ребра (стрелки) ========
+    function createEdge(fromId, toId) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      path.setAttribute('stroke', '#334155');
+      path.setAttribute('stroke-width', '2');
+      path.setAttribute('marker-end', 'url(#arrow)');
+      edgesSvg.appendChild(path);
+
+      const edge = { from: fromId, to: toId, path };
+      state.edges.push(edge);
+      updateEdge(edge);
+      return edge;
+    }
+
+    // ======== Геометрия для соединений ========
+    function getNodeRect(el) {
+      const br = boardWrap.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return {
+        x: r.left - br.left,
+        y: r.top - br.top,
+        width: r.width,
+        height: r.height,
+        cx: r.left - br.left + r.width / 2,
+        cy: r.top - br.top + r.height / 2,
+      };
+    }
+
+    // Точка пересечения луча из центра прямоугольника к внешней точке с его границей
+    function rectEdgePoint(rect, targetX, targetY, padding = 6) {
+      const cx = rect.cx, cy = rect.cy;
+      const dx = targetX - cx;
+      const dy = targetY - cy;
+      const hw = rect.width / 2 + padding;
+      const hh = rect.height / 2 + padding;
+
+      if (dx === 0 && dy === 0) return { x: cx, y: cy };
+
+      const tx = Math.abs(dx) > 1e-6 ? hw / Math.abs(dx) : Infinity;
+      const ty = Math.abs(dy) > 1e-6 ? hh / Math.abs(dy) : Infinity;
+      const t = Math.min(tx, ty);
+      return { x: cx + dx * t, y: cy + dy * t };
+    }
+
+    function updateEdge(edge) {
+      const from = state.nodes.get(edge.from);
+      const to = state.nodes.get(edge.to);
+      if (!from || !to) return;
+
+      const r1 = getNodeRect(from.el);
+      const r2 = getNodeRect(to.el);
+
+      const p1 = rectEdgePoint(r1, r2.cx, r2.cy, 6);
+      const p2 = rectEdgePoint(r2, r1.cx, r1.cy, 12); // чуть больше паддинг, чтобы стрелка не наезжала на рамку
+
+      edge.path.setAttribute('x1', p1.x);
+      edge.path.setAttribute('y1', p1.y);
+      edge.path.setAttribute('x2', p2.x);
+      edge.path.setAttribute('y2', p2.y);
+    }
+
+    function updateAllEdges() {
+      state.edges.forEach(updateEdge);
+    }
+
+    function updateEdgesForNode(id) {
+      state.edges.forEach(edge => {
+        if (edge.from === id || edge.to === id) updateEdge(edge);
+      });
+    }
+
+    // ======== Drag & Drop ========
+    function startDrag(e, id, el) {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      const br = boardWrap.getBoundingClientRect();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const rect = el.getBoundingClientRect();
+      const offsetX = startX - rect.left;
+      const offsetY = startY - rect.top;
+
+      state.dragging = { id, startX, startY, offsetX, offsetY };
+      el.classList.add('dragging');
+
+      const onMove = (ev) => {
+        if (!state.dragging) return;
+        const nx = ev.clientX - br.left - state.dragging.offsetX;
+        const ny = ev.clientY - br.top - state.dragging.offsetY;
+        el.style.left = nx + 'px';
+        el.style.top = ny + 'px';
+        clampNodeToBoard(el);
+        updateEdgesForNode(id);
+      };
+
+      const onUp = (ev) => {
+        el.releasePointerCapture(e.pointerId);
+        el.classList.remove('dragging');
+        board.removeEventListener('pointermove', onMove);
+        board.removeEventListener('pointerup', onUp);
+        state.dragging = null;
+      };
+
+      board.addEventListener('pointermove', onMove);
+      board.addEventListener('pointerup', onUp);
+    }
+
+    function clampNodeToBoard(el) {
+      const bw = boardWrap.clientWidth;
+      const bh = boardWrap.clientHeight;
+      const r = el.getBoundingClientRect();
+      const br = boardWrap.getBoundingClientRect();
+      const w = r.width;
+      const h = r.height;
+
+      let x = parseFloat(el.style.left || '0');
+      let y = parseFloat(el.style.top || '0');
+
+      x = Math.min(Math.max(0, x), bw - w);
+      y = Math.min(Math.max(0, y), bh - h);
+
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+    }
+
+    // ======== Добавление дочерней плитки ========
+    function addChildNode(parentId) {
+      const parent = state.nodes.get(parentId);
+      if (!parent) return;
+
+      const pr = getNodeRect(parent.el);
+      parent.childrenCount = (parent.childrenCount || 0) + 1;
+
+      const spread = 40; // вертикальный разброс детей
+      const x = Math.min(pr.x + 280, boardWrap.clientWidth - 240); // справа от родителя
+      const y = Math.min(Math.max(0, pr.y - spread + (parent.childrenCount - 1) * spread), boardWrap.clientHeight - 100);
+
+      const childId = createNode(x, y);
+      createEdge(parentId, childId);
+    }
+
+    // ======== Инициализация ========
+    function init() {
+      setupSvg();
+
+      // Создаём один пустой узел по центру панели
+      const startX = Math.max(20, (boardWrap.clientWidth - 240) / 2);
+      const startY = Math.max(20, (boardWrap.clientHeight - 100) / 2);
+      createNode(startX, startY);
+
+      // Обновлять viewBox у SVG при ресайзе
+      const ro = new ResizeObserver(() => onResize());
+      ro.observe(boardWrap);
+    }
+
+    init();
+  </script>
+</body>
+</html>
